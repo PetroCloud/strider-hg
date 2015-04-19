@@ -31,7 +31,7 @@ module.exports = {
   getBranches: function (userConfig, config, project, done) {
     utils.getBranches(config, project.privkey, done)
   },
-  // native git doesn't have a great way to just get a single file at an arbitrary revision
+  
   fastFile: false,
   getFile: function (filename, ref, config, project, done) {
     done(new Error('not implemented'));
@@ -49,7 +49,7 @@ module.exports = {
           res.status(500)
           return res.send({errors: [err.message]})
         }
-        res.send({success: true, message: 'Saved git config!', config: config})
+        res.send({success: true, message: 'Saved mercurial config!', config: config})
       })
     })
   }

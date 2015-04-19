@@ -1,6 +1,6 @@
-## Git provider
+## Mercurial provider
 
-Allow strider to use any git repository for a project.
+Allow strider to use any mercurial repository for a project.
 
 ### Config
 

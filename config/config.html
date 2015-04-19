@@ -3,7 +3,7 @@
   <input required
          type="text"
          ng-model="config.url"
-         placeholder="[sshuser@]example.com/my/repo.git">
+         placeholder="[sshuser@]example.com/my/repo">
 </label>
 <div class="auth-type">
   <h3>Auth type</h3>
@@ -47,7 +47,7 @@
 </div>
 <h3>Caching</h3>
 <p>
-<small>This affects whether the project is checked out with a fresh 'git clone' each time or updated via a 'git pull'.</small>
+<small>This affects whether the project is checked out with a fresh 'hg clone' each time or updated via a 'hg pull'.</small>
 <label class="checkbox">
   <input ng-model="config.cache" type="checkbox" ng-click="save()"> Cache the project data between runs
 </label>
