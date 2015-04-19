@@ -1,9 +1,36 @@
 
-var path = require('path')
-  , fs = require('fs-extra')
+var exec   = require('child_process').exec
+  , path  = require('path')
+  , fs    = require('fs-extra')
   , spawn = require('child_process').spawn
-
   , utils = require('./lib')
+
+function install_strider_key(privkey){
+  var keypath = process.env['HOME']+'/.ssh/id_strider_privkey';
+  fs.exists(keypath, function (exists) {
+    if(exists) 
+      fs.unlinkSync(keypath); 
+  })
+
+  fs.writeFileSync(keypath, privkey);
+  fs.chmodSync(keypath, '600');
+  exec('ssh-add -k ' + keypath, function(err, out, code) {
+    if (err instanceof Error)
+      console.log(err);
+  })
+}
+
+function delete_strider_key(){
+  var keypath = process.env['HOME']+'/.ssh/id_strider_privkey';
+  exec('ssh-add -D', function(err, out, code) {
+    if (err instanceof Error)
+      console.log(err);
+   })
+  fs.exists(keypath, function (exists) {
+    if(exists) 
+      fs.unlinkSync(keypath); 
+  });
+}
 
 function safespawn() {
   var c
@@ -18,71 +45,30 @@ function safespawn() {
   return c
 }
 
-function httpCloneCmd(config, branch) {
-  var urls = utils.httpUrl(config)
-    , screen = 'git clone --recursive ' + urls[1] + ' .'
-    , args = ['clone', '--recursive', urls[0], '.']
+function clone_command(config, branch) {
+  var urls = (config.auth.type === 'ssh') ? utils.sshUrl(config) : utils.httpUrl(config)
+    , screen = 'hg clone ' + urls[1] + ' .'
+    , args = ['clone', urls[0], '.']
   if (branch) {
     args = args.concat(['-b', branch])
     screen += ' -b ' + branch
   }
   return {
-    command: 'git',
+    command: 'hg',
     args: args,
     screen: screen
   }
 }
 
 function pull(dest, config, context, branch, done) {
-  utils.gitCmd('git fetch', dest, config.auth, context, function (exitCode) {
-    context.cmd({
-      cmd: 'git reset --hard origin/' + branch,
-      cwd: dest
-    }, done)
+  utils.hgCmd('hg pull -r ' + branch, dest, function (exitCode) { 
+    utils.hgCmd('hg update ' + branch + ' --clean' , dest, done)
   })
 }
-
-function gitVersion(next) {
-  var child = safespawn('git', ['--version'])
-    , out = ''
-  child.stdout.setEncoding('utf8')
-  child.stderr.setEncoding('utf8')
-  child.stdout.on('data', function (data) {
-    out += data
-  })
-  child.stderr.on('data', function (data) {
-    out += data
-  })
-  child.on('close', function (code) {
-    if (code) return next(new Error('Failed to get git version: ' + out))
-    next(null, out)
-  })
-  child.on('error', function () {})
-}
- 
 
 function clone(dest, config, ref, context, done) {
-  var git_version = parseFloat('1.0');
-  gitVersion(function(err,result){
-    var versionArray = result.split(" ");
-    if(versionArray[0] == 'git' && versionArray[1] == 'version')
-      git_version = parseFloat(versionArray[2]);
-    console.info("Git Version:"+git_version);
-  });
-
-  if (config.auth.type === 'ssh') {
-    var cmd = 'git clone --recursive ' + utils.sshUrl(config)[0] + ' .'
-    if (ref.branch) {
-      cmd += ' -b ' + ref.branch
-      // this /only/ gets the one branch; so only use if we won't be caching
-      if (!config.cache && git_version >= 1.8) cmd += ' --single-branch'
-    }
-    return utils.gitaneCmd(cmd, dest, config.auth.privkey, context, done)
-  }
-  context.cmd({
-    cmd: httpCloneCmd(config, ref.branch),
-    cwd: dest
-  }, done)}
+  utils.hgCmd(clone_command(config, ref.branch), dest, config.auth, context, done) 
+}
 
 function badCode(name, code) {
   var e = new Error(name + ' failed with code ' + code)
@@ -112,17 +98,17 @@ function getMasterPrivKey(branches) {
 }
 
 function checkoutRef(dest, cmd, ref, done) {
-  return cmd({
-    cmd: 'git checkout -qf ' + utils.shellEscape(ref.id || ref.branch),
-    cwd: dest
-  }, function (exitCode) {
-    done(exitCode && badCode('Checkout', exitCode))
+  return utils.hgCmd('hg update --clean ' + utils.shellEscape(ref.id || ref.branch), dest, function (exitCode) {
+    delete_strider_key();
+    done(exitCode && badCode('checkoutRef', exitCode));
   })
 }
 
 function fetch(dest, config, job, context, done) {
-  if (config.auth.type === 'ssh' && !config.auth.privkey) {
-    config.auth.privkey = getMasterPrivKey(job.project.branches)
+  if (config.auth.type === 'ssh') {
+    if(!config.auth.privkey)
+      config.auth.privkey = getMasterPrivKey(job.project.branches);
+    install_strider_key(config.auth.privkey);
   }
   var cloning = false
     , pleaseClone = function () {
@@ -135,8 +121,8 @@ function fetch(dest, config, job, context, done) {
 
   context.cachier.get(dest, function (err) {
     if (err) return pleaseClone()
-    // make sure .git exists
-    fs.exists(path.join(dest, '.git'), function (exists) {
+    // make sure .hg exists
+    fs.exists(path.join(dest, '.hg'), function (exists) {
       if (exists) {
         context.comment('restored code from cache')
         return pull(dest, config, context, job.ref.branch, updateCache)
@@ -148,7 +134,7 @@ function fetch(dest, config, job, context, done) {
   })
 
   function updateCache(exitCode) {
-    if (exitCode) return done(badCode('Git ' + (cloning ? 'clone' : 'pull'), exitCode))
+    if (exitCode) return done(badCode('Hg ' + (cloning ? 'clone' : 'pull'), exitCode))
     if (!config.cache) return gotten()
     context.comment('saved code to cache')
     context.cachier.update(dest, gotten)
@@ -165,13 +151,11 @@ function fetch(dest, config, job, context, done) {
 }
 
 function fetchRef(what, dest, auth, context, done) {
-  utils.gitCmd('git fetch origin ' + utils.shellEscape(what), dest, auth, context, function (exitCode) {
-    if (exitCode) return done(badCode('Fetch ' + what, exitCode))
-    context.cmd({
-      cmd: 'git checkout -qf FETCH_HEAD',
-      cwd: dest
-    }, function (exitCode) {
-      done(exitCode && badCode('Checkout', exitCode))
+  utils.hgCmd('hg pull ' + utils.shellEscape(what), dest, auth, context, function (exitCode) {
+    if (exitCode) return done(badCode('Pull ' + what, exitCode))
+    utils.hgCmd('hg update --clean', dest, function (exitCode) {
+      delete_strider_key()
+      done(exitCode && badCode('fetchRef', exitCode))
     })
   })
 }
