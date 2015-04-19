@@ -36,9 +36,11 @@ module.exports = {
   
   fastFile: false,
   getFile: function (filename, ref, config, project, done) {
-    done(new Error('not implemented'));
-    // utils.gitcmd('git archive --remote=' + url + ' ' + (ref.fetch || ref.id) + ' .strider.json', ...);
+    var err = { data: 'Not Found', status: 404 }
+      , body = 'Not Found'
+    done(err, body);
   },
+
   routes: function (app, context) {
     app.get('config', context.auth.requireProjectAdmin, function (req, res) {
       res.send(req.providerConfig())
