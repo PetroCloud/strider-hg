@@ -1,6 +1,6 @@
 {
   "name": "strider-hg",
-  "version": "0.2.2",
+  "version": "0.2.3",
   "description": "Strider provider for mercurial repositories",
   "main": "worker.js",
   "scripts": {
@@ -8,7 +8,7 @@
   },
   "repository": {
     "type": "git",
-    "url": "https://github.com/Strider-CD/strider-hg"
+    "url": "https://github.com/Mixaill/strider-hg"
   },
   "keywords": [
     "strider",
@@ -16,7 +16,7 @@
     "provider",
     "hg"
   ],
-  "author": "Jared Forsyth <jared@jaredforsyth.com>",
+  "author": "Mikhail Paulyshka <me@mixaill.tk>",
   "license": "MIT",
   "readmeFilename": "Readme.md",
   "strider": {
