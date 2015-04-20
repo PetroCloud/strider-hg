@@ -110,6 +110,13 @@ function fetch(dest, config, job, context, done) {
       config.auth.privkey = getMasterPrivKey(job.project.branches);
     install_strider_key(config.auth.privkey);
   }
+
+  // dirty hack: 'master' name for main branch is hardcoded in strider core, but mercurial use 'default'
+  if(job.ref.branch === 'master')
+  {
+    job.ref.branch = 'default'
+  }
+
   var cloning = false
     , pleaseClone = function () {
         cloning = true
