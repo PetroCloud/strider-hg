@@ -61,13 +61,13 @@ function clone_command(config, branch) {
 }
 
 function pull(dest, config, context, branch, done) {
-  utils.hgCmd('hg pull -r ' + branch, dest, function (exitCode) { 
-    utils.hgCmd('hg update ' + branch + ' --clean' , dest, done)
+  utils.hgCmd('hg pull -r ' + branch, dest, context, function (exitCode) { 
+    utils.hgCmd('hg update ' + branch + ' --clean' , dest, context, done)
   })
 }
 
 function clone(dest, config, ref, context, done) {
-  utils.hgCmd(clone_command(config, ref.branch), dest, config.auth, context, done) 
+  utils.hgCmd(clone_command(config, ref.branch), dest, context, done) 
 }
 
 function badCode(name, code) {
@@ -97,8 +97,8 @@ function getMasterPrivKey(branches) {
   }
 }
 
-function checkoutRef(dest, cmd, ref, done) {
-  return utils.hgCmd('hg update --clean ' + utils.shellEscape(ref.id || ref.branch), dest, function (exitCode) {
+function checkoutRef(dest, context, ref, done) {
+  return utils.hgCmd('hg update --clean ' + utils.shellEscape(ref.id || ref.branch), dest, context, function (exitCode) {
     delete_strider_key();
     done(exitCode && badCode('checkoutRef', exitCode));
   })
@@ -144,16 +144,16 @@ function fetch(dest, config, job, context, done) {
     if (err) return done(err)
     // fetch the ref
     if (job.ref.branch && !job.ref.fetch) {
-      return checkoutRef(dest, context.cmd, job.ref, done)
+      return checkoutRef(dest, context, job.ref, done)
     }
     fetchRef(job.ref.fetch, dest, config.auth, context, done)
   }
 }
 
 function fetchRef(what, dest, auth, context, done) {
-  utils.hgCmd('hg pull ' + utils.shellEscape(what), dest, auth, context, function (exitCode) {
+  utils.hgCmd('hg pull ' + utils.shellEscape(what), dest, context, function (exitCode) {
     if (exitCode) return done(badCode('Pull ' + what, exitCode))
-    utils.hgCmd('hg update --clean', dest, function (exitCode) {
+    utils.hgCmd('hg update --clean', dest, context, function (exitCode) {
       delete_strider_key()
       done(exitCode && badCode('fetchRef', exitCode))
     })
