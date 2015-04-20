@@ -31,6 +31,8 @@ module.exports = {
     }
   },
   getBranches: function (userConfig, config, project, done) {
+    if(!project.privkey)
+      project.privkey = utils.sshkey_extract(project.branches);
     utils.getBranches(config, project.privkey, done)
   },
   

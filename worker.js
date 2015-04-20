@@ -5,33 +5,6 @@ var exec   = require('child_process').exec
   , spawn = require('child_process').spawn
   , utils = require('./lib')
 
-function install_strider_key(privkey){
-  var keypath = process.env['HOME']+'/.ssh/id_strider_privkey';
-  fs.exists(keypath, function (exists) {
-    if(exists) 
-      fs.unlinkSync(keypath); 
-  })
-
-  fs.writeFileSync(keypath, privkey);
-  fs.chmodSync(keypath, '600');
-  exec('ssh-add -k ' + keypath, function(err, out, code) {
-    if (err instanceof Error)
-      console.log(err);
-  })
-}
-
-function delete_strider_key(){
-  var keypath = process.env['HOME']+'/.ssh/id_strider_privkey';
-  exec('ssh-add -D', function(err, out, code) {
-    if (err instanceof Error)
-      console.log(err);
-   })
-  fs.exists(keypath, function (exists) {
-    if(exists) 
-      fs.unlinkSync(keypath); 
-  });
-}
-
 function safespawn() {
   var c
   try {
@@ -89,17 +62,9 @@ module.exports = {
   fetch: fetch
 }
 
-function getMasterPrivKey(branches) {
-  for (var i=0; i<branches.length; i++) {
-    if (branches[i].name === 'master') {
-      return branches[i].privkey
-    }
-  }
-}
-
 function checkoutRef(dest, context, ref, done) {
   return utils.hgCmd('hg update --clean ' + utils.shellEscape(ref.id || ref.branch), dest, context, function (exitCode) {
-    delete_strider_key();
+    utils.sshkey_delete();
     done(exitCode && badCode('checkoutRef', exitCode));
   })
 }
@@ -107,8 +72,8 @@ function checkoutRef(dest, context, ref, done) {
 function fetch(dest, config, job, context, done) {
   if (config.auth.type === 'ssh') {
     if(!config.auth.privkey)
-      config.auth.privkey = getMasterPrivKey(job.project.branches);
-    install_strider_key(config.auth.privkey);
+      config.auth.privkey = utils.sshkey_extract(job.project.branches);
+    utils.sshkey_install(config.auth.privkey);
   }
 
   // dirty hack: 'master' name for main branch is hardcoded in strider core, but mercurial use 'default'
@@ -161,7 +126,7 @@ function fetchRef(what, dest, auth, context, done) {
   utils.hgCmd('hg pull ' + utils.shellEscape(what), dest, context, function (exitCode) {
     if (exitCode) return done(badCode('Pull ' + what, exitCode))
     utils.hgCmd('hg update --clean', dest, context, function (exitCode) {
-      delete_strider_key()
+      utils.sshkey_delete();
       done(exitCode && badCode('fetchRef', exitCode))
     })
   })

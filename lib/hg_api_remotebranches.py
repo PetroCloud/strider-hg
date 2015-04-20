@@ -1,3 +1,5 @@
+#!/usr/bin/python
+
 from mercurial import ui, hg, node
 from sys import argv
 
