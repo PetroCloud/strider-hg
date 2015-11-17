@@ -1,36 +1,36 @@
+'use strict';
 
-var exec   = require('child_process').exec
-  , path  = require('path')
-  , fs    = require('fs-extra')
-  , spawn = require('child_process').spawn
-  , utils = require('./lib')
+var path = require('path');
+var fs = require('fs-extra');
+var spawn = require('child_process').spawn;
+var utils = require('./lib');
 
 function safespawn() {
-  var c
+  var process;
   try {
-    c = spawn.apply(null, arguments)
+    process = spawn.apply(null, arguments);
   } catch (e) {
     throw new Error('Failed to start command: ' + JSON.stringify([].slice.call(arguments)))
   }
-  c.on('error', function (err) {
+  process.on('error', function (err) {
     // suppress node errors
-  })
-  return c
+  });
+  return process;
 }
 
-function clone_command(config, branch) {
-  var urls = (config.auth.type === 'ssh') ? utils.sshUrl(config) : utils.httpUrl(config)
-    , screen = 'hg clone ' + urls[1] + ' .'
-    , args = ['clone', urls[0], '.']
+function httpCloneCmd(config, branch) {
+  var urls = utils.httpUrl(config);
+  var screen = 'git clone --recursive ' + urls[1] + ' .';
+  var args = ['clone', '--recursive', urls[0], '.'];
   if (branch) {
-    args = args.concat(['-b', branch])
-    screen += ' -b ' + branch
+    args = args.concat(['--branch', branch]);
+    screen += ' --branch ' + branch;
   }
   return {
     command: 'hg',
     args: args,
     screen: screen
-  }
+  };
 }
 
 function pull(dest, config, context, branch, done) {
@@ -39,15 +39,52 @@ function pull(dest, config, context, branch, done) {
   })
 }
 
+function hgVersion(next) {
+  var child = safespawn('hg', ['--version']);
+  var out = '';
+  child.stdout.setEncoding('utf8');
+  child.stderr.setEncoding('utf8');
+  child.stdout.on('data', function (data) {
+    out += data;
+  });
+  child.stderr.on('data', function (data) {
+    out += data;
+  });
+  child.on('close', function (code) {
+    if (code) return next(new Error('Failed to get hg version: ' + out));
+    next(null, out);
+  });
+  child.on('error', function () {});
+}
+
 function clone(dest, config, ref, context, done) {
-  utils.hgCmd(clone_command(config, ref.branch), dest, context, done) 
+  var hg_version = parseFloat('1.0');
+  hgVersion(function(err,result){
+    var versionArray = result.split(' ');
+    if(versionArray[0] == 'hg' && versionArray[1] == 'version') {
+      hg_version = parseFloat(versionArray[2]);
+    }
+    console.info('Hg Version:'+git_version);
+  });
+
+  if (config.auth.type === 'ssh') {
+    var cmd = 'hg clone ' + utils.sshUrl(config)[0] + ' .';
+    if (ref.branch) {
+      cmd += ' --branch ' + ref.branch;
+    }
+    return utils.mercuraneCmd(cmd, dest, config.auth.privkey, context, done);
+  }
+  context.cmd({
+    cmd: httpCloneCmd(config, ref.branch),
+    cwd: dest
+  }, done);
 }
 
 function badCode(name, code) {
-  var e = new Error(name + ' failed with code ' + code)
-  e.code = code
-  e.exitCode = code
-  return e
+  var e = new Error(name + ' failed with code ' + code);
+  e.code = code;
+  e.exitCode = code;
+  return e;
 }
 
 module.exports = {
@@ -55,81 +92,93 @@ module.exports = {
     return done(null, {
       config: config,
       fetch: function (context, done) {
-        module.exports.fetch(dirs.data, config, job, context, done)
+        module.exports.fetch(dirs.data, config, job, context, done);
       }
     })
   },
   fetch: fetch
+};
+
+function getMasterPrivKey(branches) {
+  for (var i=0; i<branches.length; i++) {
+    if (branches[i].name === 'default') {
+      return branches[i].privkey;
+    }
+  }
 }
 
-function checkoutRef(dest, context, ref, done) {
-  return utils.hgCmd('hg update --clean ' + utils.shellEscape(ref.id || ref.branch), dest, context, function (exitCode) {
-    utils.sshkey_delete();
-    done(exitCode && badCode('checkoutRef', exitCode));
-  })
+function checkoutRef(dest, cmd, ref, done) {
+  if (job.ref.branch === 'master') { 
+    job.ref.branch = 'default'
+  }
+  return cmd({
+    cmd: 'hg checkout --quiet --clean ' + (ref.id ? 'r' : '') + utils.shellEscape(ref.id || ref.branch),
+    cwd: dest
+  }, function (exitCode) {
+    done(exitCode && badCode('Checkout', exitCode));
+  });
 }
 
 function fetch(dest, config, job, context, done) {
-  if (config.auth.type === 'ssh') {
-    if(!config.auth.privkey)
-      config.auth.privkey = utils.sshkey_extract(job.project.branches);
-    utils.sshkey_install(config.auth.privkey);
+  if (config.auth.type === 'ssh' && !config.auth.privkey) {
+    config.auth.privkey = getMasterPrivKey(job.project.branches);
   }
-
-  // dirty hack: 'master' name for main branch is hardcoded in strider core, but mercurial use 'default'
-  if(job.ref.branch === 'master')
-  {
-    job.ref.branch = 'default'
+  var cloning = false;
+  function pleaseClone() {
+    cloning = true;
+    fs.mkdirp(dest, function () {
+      clone(dest, config, job.ref, context, updateCache);
+    })
   }
-
-  var cloning = false
-    , pleaseClone = function () {
-        cloning = true
-        fs.mkdirp(dest, function () {
-          clone(dest, config, job.ref, context, updateCache)
-        })
-      }
-  if (!config.cache) return pleaseClone()
+  if (!config.cache) return pleaseClone();
 
   context.cachier.get(dest, function (err) {
-    if (err) return pleaseClone()
-    // make sure .hg exists
+    if (err) return pleaseClone();
+    // make sure .git exists
     fs.exists(path.join(dest, '.hg'), function (exists) {
       if (exists) {
-        context.comment('restored code from cache')
-        return pull(dest, config, context, job.ref.branch, updateCache)
+        context.comment('restored code from cache');
+        return pull(dest, config, context, job.ref.branch, updateCache);
       }
       fs.remove(dest, function(err) {
-        pleaseClone()
-      })
-    })
-  })
+        pleaseClone();
+      });
+    });
+  });
 
   function updateCache(exitCode) {
-    if (exitCode) return done(badCode('Hg ' + (cloning ? 'clone' : 'pull'), exitCode))
-    if (!config.cache) return gotten()
-    context.comment('saved code to cache')
-    context.cachier.update(dest, gotten)
+    if (exitCode) {
+      return done(badCode('Hg ' + (cloning ? 'clone' : 'pull'), exitCode));
+    }
+    if (!config.cache) {
+      return gotten();
+    }
+    context.comment('saved code to cache');
+    context.cachier.update(dest, gotten);
   }
 
   function gotten (err) {
-    if (err) return done(err)
+    if (err) {
+      return done(err);
+    }
     // fetch the ref
     if (job.ref.branch && !job.ref.fetch) {
-      return checkoutRef(dest, context, job.ref, done)
+      return checkoutRef(dest, context.cmd, job.ref, done);
     }
-    fetchRef(job.ref.fetch, dest, config.auth, context, done)
+    fetchRef(job.ref.fetch, dest, config.auth, context, done);
   }
 }
 
 function fetchRef(what, dest, auth, context, done) {
-  utils.hgCmd('hg pull ' + utils.shellEscape(what), dest, context, function (exitCode) {
-    if (exitCode) return done(badCode('Pull ' + what, exitCode))
-    utils.hgCmd('hg update --clean', dest, context, function (exitCode) {
-      utils.sshkey_delete();
-      done(exitCode && badCode('fetchRef', exitCode))
-    })
-  })
+  utils.hgCmd('hg pull ' + utils.shellEscape(what), dest, auth, context, function (exitCode) {
+    if (exitCode) {
+      return done(badCode('Fetch ' + what, exitCode));
+    }
+    context.cmd({
+      cmd: 'hg checkout --quiet --clean',
+      cwd: dest
+    }, function (exitCode) {
+      done(exitCode && badCode('Checkout', exitCode));
+    });
+  });
 }
-
-

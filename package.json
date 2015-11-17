@@ -1,6 +1,6 @@
 {
   "name": "strider-hg",
-  "version": "0.2.3",
+  "version": "0.2.4",
   "description": "Strider provider for mercurial repositories",
   "main": "worker.js",
   "scripts": {
@@ -17,6 +17,7 @@
     "hg"
   ],
   "author": "Mikhail Paulyshka <me@mixaill.tk>",
+  "contributors": ["Nigel Foucha <nigel.foucha@petrocloud.com>",
   "license": "MIT",
   "readmeFilename": "Readme.md",
   "strider": {
@@ -31,7 +32,8 @@
   "dependencies": {
     "shell-escape": "0.0.1",
     "fs-extra": "~0.8.1",
-    "underscore": "~1.8.3"
+    "underscore": "~1.8.3",
+    "mercurane": "0.1.x"
   },
   "devDependencies": {
     "jshint": "~2.3.0",
