@@ -17,7 +17,7 @@
     "hg"
   ],
   "author": "Mikhail Paulyshka <me@mixaill.tk>",
-  "contributors": ["Nigel Foucha <nigel.foucha@petrocloud.com>",
+  "contributors": ["Nigel Foucha <nigel.foucha@petrocloud.com>"],
   "license": "MIT",
   "readmeFilename": "Readme.md",
   "strider": {

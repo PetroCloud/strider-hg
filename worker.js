@@ -20,8 +20,8 @@ function safespawn() {
 
 function httpCloneCmd(config, branch) {
   var urls = utils.httpUrl(config);
-  var screen = 'git clone --recursive ' + urls[1] + ' .';
-  var args = ['clone', '--recursive', urls[0], '.'];
+  var screen = 'hg clone ' + urls[1] + ' .';
+  var args = ['clone', urls[0], '.'];
   if (branch) {
     args = args.concat(['--branch', branch]);
     screen += ' --branch ' + branch;
@@ -58,13 +58,16 @@ function hgVersion(next) {
 }
 
 function clone(dest, config, ref, context, done) {
+  if (ref.branch === 'master') {
+    ref.branch = 'default';
+  }
   var hg_version = parseFloat('1.0');
   hgVersion(function(err,result){
     var versionArray = result.split(' ');
-    if(versionArray[0] == 'hg' && versionArray[1] == 'version') {
-      hg_version = parseFloat(versionArray[2]);
+    if(versionArray[0] == 'Mercurial' && versionArray[3] == '(version') {
+      hg_version = parseFloat(versionArray[4].substring(0,versionArray[4].length-2));
     }
-    console.info('Hg Version:'+git_version);
+    console.info('Hg Version: '+hg_version);
   });
 
   if (config.auth.type === 'ssh') {
@@ -101,18 +104,18 @@ module.exports = {
 
 function getMasterPrivKey(branches) {
   for (var i=0; i<branches.length; i++) {
-    if (branches[i].name === 'default') {
+    if (branches[i].name === 'master') {
       return branches[i].privkey;
     }
   }
 }
 
 function checkoutRef(dest, cmd, ref, done) {
-  if (job.ref.branch === 'master') { 
-    job.ref.branch = 'default'
+  if (ref.branch === 'master') { 
+    ref.branch = 'default';
   }
   return cmd({
-    cmd: 'hg checkout --quiet --clean ' + (ref.id ? 'r' : '') + utils.shellEscape(ref.id || ref.branch),
+    cmd: 'hg checkout --quiet --clean ' + (ref.id ? '-r' : '') + utils.shellEscape(ref.id || ref.branch),
     cwd: dest
   }, function (exitCode) {
     done(exitCode && badCode('Checkout', exitCode));
@@ -120,6 +123,9 @@ function checkoutRef(dest, cmd, ref, done) {
 }
 
 function fetch(dest, config, job, context, done) {
+  if (job.ref.branch === 'master') {
+    job.ref.branch === 'default';
+  }
   if (config.auth.type === 'ssh' && !config.auth.privkey) {
     config.auth.privkey = getMasterPrivKey(job.project.branches);
   }
@@ -157,7 +163,7 @@ function fetch(dest, config, job, context, done) {
     context.cachier.update(dest, gotten);
   }
 
-  function gotten (err) {
+  function gotten(err) {
     if (err) {
       return done(err);
     }
@@ -175,7 +181,7 @@ function fetchRef(what, dest, auth, context, done) {
       return done(badCode('Fetch ' + what, exitCode));
     }
     context.cmd({
-      cmd: 'hg checkout --quiet --clean',
+      cmd: 'hg update --quiet --clean',
       cwd: dest
     }, function (exitCode) {
       done(exitCode && badCode('Checkout', exitCode));
