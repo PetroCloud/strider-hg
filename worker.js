@@ -1,9 +1,10 @@
-'use strict';
-
 var path = require('path');
 var fs = require('fs-extra');
 var spawn = require('child_process').spawn;
 var utils = require('./lib');
+var Step = require('step');
+var isWindows = /^win/.test(process.platform);
+var PATH = isWindows ? process.env.Path : process.env.PATH;
 
 function safespawn() {
   var process;
@@ -31,6 +32,21 @@ function httpCloneCmd(config, branch) {
     args: args,
     screen: screen
   };
+}
+
+function httpCloneMergeCmd(config, job) {
+  var urls = utils.httpUrl(config);
+  var screen = 'hg clone ' + urls[1] + ' .';
+  screen += ' && hg update --clean ' + job.ref.destination.branch;
+  screen += ' && hg merge --quiet --tool /bin/false -r ' + job.hash;
+  var args = ['clone', urls[0], '.']
+  args.push('&&', 'hg', 'update', '--clean', job.ref.destination.branch);
+  args.push('&&', 'hg', 'merge', '--quiet', '--tool', '/bin/false', '-r', job.ref.id);
+  return {
+    command: 'hg',
+    args: args,
+    screen: screen
+  }
 }
 
 function pull(dest, config, context, branch, done) {
@@ -67,7 +83,7 @@ function clone(dest, config, ref, context, done) {
     if(versionArray[0] == 'Mercurial' && versionArray[3] == '(version') {
       hg_version = parseFloat(versionArray[4].substring(0,versionArray[4].length-2));
     }
-    console.info('Hg Version: '+hg_version);
+    console.info('Hg Version: ' + hg_version);
   });
 
   if (config.auth.type === 'ssh') {
@@ -122,12 +138,136 @@ function checkoutRef(dest, cmd, ref, done) {
   });
 }
 
+function cloneMerge(dest, config, job, context, done) {
+    if (job.ref.branch === 'master') {
+        job.ref.branch = 'default';
+    }
+    var hg_version = parseFloat('1.0');
+    hgVersion(function(err,result){
+        var versionArray = result.split(' ');
+        if(versionArray[0] == 'Mercurial' && versionArray[3] == '(version') {
+            hg_version = parseFloat(versionArray[4].substring(0,versionArray[4].length-2));
+        }
+        console.info('Hg Version: ' + hg_version);
+    });
+
+    if (config.auth.type === 'ssh') {
+        console.info('cloning with ssh');
+        var cmd = 'hg clone ' + utils.sshUrl(config)[0] + ' .';
+        utils.mercuraneCmd(cmd, dest, config.auth.privkey, context, function(err, log) {
+          if (err) {
+            return done(err);
+          }
+          console.info('clone complete, switching branch');
+          var hgCmd = 'hg';
+          var updateArgs = ['update', '--clean', job.ref.destination.branch];
+          var mergeArgs = ['merge', '--quiet', '--tool', '/bin/false', '-r', job.ref.id];
+          Step(
+            function() {
+              var updateProc = spawn(hgCmd, updateArgs, {cwd: dest, env: {PATH:PATH}});
+              updateProc.stdoutBuffer = "";
+              updateProc.stderrBuffer = "";
+              updateProc.stdout.setEncoding('utf8');
+              updateProc.stderr.setEncoding('utf8');
+
+              updateProc.stdout.on('data', function(buf) {
+                if (typeof(context.emitter) === 'object') {
+                  context.emitter.emit('stdout', buf);
+                }
+                updateProc.stdoutBuffer += buf;
+              });
+
+              updateProc.stderr.on('data', function(buf) {
+                if (typeof(context.emitter) === 'object') {
+                  context.emitter.emit('stderr', buf);
+                }
+                updateProc.stderrBuffer += buf;
+              });
+
+              var self = this;
+              updateProc.on('close', function(exitCode) {
+                var err;
+                if (exitCode !== 0) {
+                    err = 'error running hg update: ' + exitCode;
+                    console.error(err);
+                }
+                self(err, updateProc.stdoutBuffer, updateProc.stderrBuffer, exitCode);
+              });
+              updateProc.on('error', function (err) {
+              });
+            },
+            function(err, stdout, stderr, exitCode) {
+              if (exitCode !== 0) {
+                console.error('Error running hg update');
+                console.error(stdout);
+                console.error(stderr);
+                return done(err);
+              }
+              console.info('done with update, merging');
+              var mergeProc = spawn(hgCmd, mergeArgs, {cwd: dest, env: {PATH:PATH}});
+              mergeProc.stdoutBuffer = "";
+              mergeProc.stderrBuffer = "";
+              mergeProc.stdout.setEncoding('utf8');
+              mergeProc.stderr.setEncoding('utf8');
+
+              mergeProc.stdout.on('data', function(buf) {
+                if (typeof(context.emitter) === 'object') {
+                  context.emitter.emit('stdout', buf);
+                }
+                mergeProc.stdoutBuffer += buf;
+              });
+
+              mergeProc.stderr.on('data', function(buf) {
+                if (typeof(context.emitter) === 'object') {
+                  context.emitter.emit('stderr', buf);
+                }
+                mergeProc.stderrBuffer += buf;
+              });
+
+              var self = this;
+              mergeProc.on('close', function(exitCode) {
+                if (exitCode !== 0) {
+                    console.error('Error running hg merge: ' + exitCode);
+                    console.error('\n\n' + mergeProc.stdoutBuffer + '\n\n' + mergeProc.stderrBuffer);
+                    return done(exitCode);
+                }
+                return done();
+              });
+              mergeProc.on('error', function (err) {
+              });
+            }
+          );
+        });
+    }
+    else {
+      context.cmd({
+          cmd: httpCloneMergeCmd(config, job),
+          cwd: dest
+      }, done);
+    }
+}
+
+function prFetch(dest, config, job, context, done) {
+    if (job.ref.destination.ref.branch === 'master') {
+        job.ref.destination.ref.branch = 'default';
+    }
+    fs.mkdirp(dest, function () {
+        cloneMerge(dest, config, job, context, chkMerge);
+    });
+    function chkMerge(exitCode) {
+        done(exitCode && badCode('Hg clone and merge', exitCode));
+    }
+}
+
 function fetch(dest, config, job, context, done) {
   if (job.ref.branch === 'master') {
     job.ref.branch === 'default';
   }
   if (config.auth.type === 'ssh' && !config.auth.privkey) {
     config.auth.privkey = getMasterPrivKey(job.project.branches);
+  }
+  if (job.trigger.type === 'pullrequest') {
+    return prFetch(dest, config, job, context, done);
   }
   var cloning = false;
   function pleaseClone() {
@@ -140,7 +280,7 @@ function fetch(dest, config, job, context, done) {
 
   context.cachier.get(dest, function (err) {
     if (err) return pleaseClone();
-    // make sure .git exists
+    // make sure .hg exists
     fs.exists(path.join(dest, '.hg'), function (exists) {
       if (exists) {
         context.comment('restored code from cache');
